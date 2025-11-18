@@ -32,7 +32,7 @@ O script Python é central para a simulação da "realidade" industrial, aplican
 | :--- | :--- | :--- |
 | **Estado do Sensor/Qualidade** | Varia a frequência de peças que falham na inspeção (peças defeituosas). | Normal (Gaussiana) |
 | **Tempo para Falha (MTBF)** | Simula falhas de componentes chave, como o motor do transportador. | Exponencial / Weibull |
-| **Volume de Produção** | Altera a taxa de geração de peças pelo Emissor (`Emitter`). | Uniforme |
+| **Volume de Produção** | Altera a taxa de geração de peças pelo Emissor (**`Emitter 0`**). | Uniforme |
 
 ---
 
@@ -40,12 +40,12 @@ O script Python é central para a simulação da "realidade" industrial, aplican
 
 O pipeline representa a jornada do dado, do chão de fábrica (simulado) até o painel de análise:
 
-1.  **Geração e Controle (Factory I/O / CODESYS):** O processo físico simula a contagem ($C\_TOTAL, C\_APROVADAS$) e o controle do Pistão de Rejeição, expondo todas as variáveis via OPC UA Server.
+1.  **Geração e Controle (Factory I/O / CODESYS):** O processo físico simula a contagem ($C\_TOTAL, C\_APROVADAS$) e o controle do Pistão de Rejeição (**`Pusher 0`**), expondo todas as variáveis via OPC UA Server.
 
-2.  **Leitura e Injeção (Python):** O Cliente OPC UA em Python **lê** os dados do controle (Contadores) e **escreve** as variáveis estatísticas geradas, forçando a ocorrência de falhas e erros de qualidade.
+2.  **Leitura e Injeção (Python):** O Cliente OPC UA em Python **lê** os dados do controle (Contadores) e **escreve** as variáveis estatísticas geradas, forçando a ocorrência de falhas e erros de qualidade.
 
-3.  **Coleta e Ingestão (Datalogger):** O Datalogger (Python) coleta os dados brutos e os envia em tempo real para a **Azure Cloud** (IoT Hub).
+3.  **Coleta e Ingestão (Datalogger):** O Datalogger (Python) coleta os dados brutos e os envia em tempo real para a **Azure Cloud** (IoT Hub).
 
-4.  **Processamento e Enriquecimento (Azure Databricks):** Os dados são limpos e transformados. O Databricks calcula métricas avançadas (OEE, Produtividade, Taxa de Rejeição) e armazena o resultado no **Delta Lake**.
+4.  **Processamento e Enriquecimento (Azure Databricks):** Os dados são limpos e transformados. O Databricks calcula métricas avançadas (OEE, Produtividade, Taxa de Rejeição) e armazena o resultado no **Delta Lake**.
 
-5.  **Análise e Tomada de Decisão (Power BI):** O Power BI se conecta ao Delta Lake para fornecer dashboards de monitoramento e relatórios analíticos, completando o ciclo do Gêmeo Digital.
+5.  **Análise e Tomada de Decisão (Power BI):** O Power BI se conecta ao Delta Lake para fornecer dashboards de monitoramento e relatórios analíticos, completando o ciclo do Gêmeo Digital.
