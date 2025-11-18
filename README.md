@@ -1,48 +1,51 @@
-# 🏭 Industrial Digital Twin Simulation and Data Pipeline
+# 🏭 GÊMEO DIGITAL INDUSTRIAL E PIPELINE DE DADOS (IIoT)
 
-## Project Overview
+## 🚀 VISÃO GERAL DO PROJETO
 
-This personal project aims to simulate a complete manufacturing environment within the **Industry 4.0** context, integrating process simulation, real-time control, statistical data orchestration, and cloud-based analysis. The main objective is to study the interconnection of the following technologies:
+Este projeto pessoal simula um ambiente de manufatura baseado no conceito da **Indústria 4.0**, com foco na **Linha de Inspeção e Triagem Automatizada** desenvolvida. O objetivo é interconectar tecnologias para criar uma cadeia completa de **IIoT (Industrial Internet of Things)**: desde a simulação física até a análise de dados na nuvem.
 
-* **Control and Simulation:** Factory I/O & CODESYS (SoftPLC).
-* **Industrial Communication:** OPC UA (Client/Server).
-* **Orchestration and Statistics:** Python (Statistical Distribution Generation).
-* **Cloud and Analytics:** Azure Cloud, Databricks, and Power BI.
-
-The project establishes a comprehensive **IIoT (Industrial Internet of Things)** chain, where Python acts as the variability engine, simulating real-world conditions like equipment failures, quality deviations (part errors), and production volume fluctuations through controlled statistical distributions.
+O **Python** atua como o motor de variabilidade (ou *variability engine*), simulando condições reais de fábrica (erros de qualidade, falhas de equipamento, flutuações de volume) através de distribuições estatísticas controladas, injetando essa "realidade" no controle do processo.
 
 ---
 
-## 🛠️ Technologies and Tools
+## 🛠️ TECNOLOGIAS E FERRAMENTAS
 
-| Category | Tool | Project Function |
+A integração dessas ferramentas estabelece uma ponte entre o chão de fábrica digital e o ecossistema de dados na nuvem:
+
+| Categoria | Ferramenta | Função no Projeto |
 | :--- | :--- | :--- |
-| **Simulation** | Factory I/O | Visual and real-time simulation of the production line. |
-| **Control** | CODESYS | SoftPLC for controlling Factory I/O I/Os via an OPC UA Server. |
-| **Orchestration** | Python | OPC UA Client, statistical distribution generator (numpy), and Datalogger. |
-| **Communication** | OPC UA | Communication protocol between Python and CODESYS. |
-| **Ingestion/Storage** | Azure Cloud | Azure Storage Account / IoT Hub for receiving and storing raw data. |
-| **Processing/Analysis** | Azure Databricks | Cleaning, transformation (OEE calculation), and data enrichment. |
-| **Visualization** | Power BI | Creation of dashboards for monitoring simulated production KPIs (Key Performance Indicators). |
+| **Simulação Física** | **Factory I/O** | Simulação visual da linha de Inspeção e Triagem. |
+| **Controle (SoftPLC)** | **CODESYS** | Implementação da lógica de controle (Triagem, Contagem) e exposição dos dados via OPC UA Server. |
+| **Comunicação** | **OPC UA** | Protocolo de comunicação entre o Python (Cliente) e o CODESYS (Servidor). |
+| **Orquestração** | **Python** | Cliente OPC UA, gerador de dados estatísticos (variabilidade) e Datalogger. |
+| **Ingestão/Armazenamento** | **Azure Cloud** | IoT Hub e Azure Storage Account para recepção e armazenamento de dados brutos. |
+| **Processamento/Análise** | **Azure Databricks** | Transformação (ETL/ELT), enriquecimento de dados e cálculo de KPIs (Ex: OEE, Taxa de Rejeição). |
+| **Visualização** | **Power BI** | Criação de dashboards para monitoramento em tempo real dos KPIs de produção simulada. |
 
 ---
 
-## 📊 Data Generation Structure (Python)
+## 📊 SIMULAÇÃO DE VARIABILIDADE ESTRUTURADA
 
-The core Python script centralizes the generation of the simulated industrial "reality" by applying different statistical distributions to key variables, which are then injected into CODESYS via OPC UA.
+O script Python é central para a simulação da "realidade" industrial, aplicando distribuições estatísticas para variáveis que influenciam a linha de triagem:
 
-| Simulated Variable (Example) | Statistical Distribution | Objective |
+| Variável Simulada | Aplicação no Cenário da Linha | Distribuição Estatística |
 | :--- | :--- | :--- |
-| Quality Error | Normal (Gaussian) | Simulating dimensional tolerances and deviations in parts. |
-| Time to Failure | Exponential / Weibull | Simulating equipment MTBF (Mean Time Between Failures). |
-| Production Volume | Uniform | Simulating random variations in demand or raw material feeding rate. |
+| **Estado do Sensor/Qualidade** | Varia a frequência de peças que falham na inspeção (peças defeituosas). | Normal (Gaussiana) |
+| **Tempo para Falha (MTBF)** | Simula falhas de componentes chave, como o motor do transportador. | Exponencial / Weibull |
+| **Volume de Produção** | Altera a taxa de geração de peças pelo Emissor (`Emitter`). | Uniforme |
 
 ---
 
-## 🗺️ Data Pipeline Flow
+## 🗺️ FLUXO COMPLETO DO PIPELINE DE DADOS
 
-1.  **Factory I/O / CODESYS:** Process simulation and control, exposing data via the **OPC UA Server**.
-2.  **Python Script:** OPC UA Client, which **reads** sensor data and **writes** the statistically generated variables for control.
-3.  **Datalogger (Python):** Collects raw data and sends it to **Azure Cloud**.
-4.  **Azure Databricks:** Processing (ETL/ELT) of raw data and storage in **Delta Lake**.
-5.  **Power BI:** Connects to the Delta Lake for visualization and KPI monitoring.
+O pipeline representa a jornada do dado, do chão de fábrica (simulado) até o painel de análise:
+
+1.  **Geração e Controle (Factory I/O / CODESYS):** O processo físico simula a contagem ($C\_TOTAL, C\_APROVADAS$) e o controle do Pistão de Rejeição, expondo todas as variáveis via OPC UA Server.
+
+2.  **Leitura e Injeção (Python):** O Cliente OPC UA em Python **lê** os dados do controle (Contadores) e **escreve** as variáveis estatísticas geradas, forçando a ocorrência de falhas e erros de qualidade.
+
+3.  **Coleta e Ingestão (Datalogger):** O Datalogger (Python) coleta os dados brutos e os envia em tempo real para a **Azure Cloud** (IoT Hub).
+
+4.  **Processamento e Enriquecimento (Azure Databricks):** Os dados são limpos e transformados. O Databricks calcula métricas avançadas (OEE, Produtividade, Taxa de Rejeição) e armazena o resultado no **Delta Lake**.
+
+5.  **Análise e Tomada de Decisão (Power BI):** O Power BI se conecta ao Delta Lake para fornecer dashboards de monitoramento e relatórios analíticos, completando o ciclo do Gêmeo Digital.
