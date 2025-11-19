@@ -1,6 +1,7 @@
 import sys
 import time
 import json
+import threading
 import datetime
 from opcua import Client, ua
 
@@ -17,42 +18,12 @@ class SubscriptionLogger:
     def log_data(self, log_entry: dict):
         """Escreve uma entrada de log no arquivo NDJSON."""
         try:
-            with open(self.filename, 'a') as f:
+            with open(self.filename, 'a', encoding='utf-8') as f:
                 f.write(json.dumps(log_entry) + '\n')
             print(f"[{log_entry['timestamp_local']}] 🔔 Logged change for {log_entry['node_id']} ({log_entry['display_name']}): {log_entry['value']}")
 
         except Exception as e:
             print(f"Erro ao escrever no arquivo de log: {e}", file=sys.stderr)
-
-
-# --- 2. Handler para Notificações de Mudança de Dados ---
-
-class DataChangeHandler:
-    """
-    Manipulador que é chamado pelo cliente OPC UA sempre que um valor de
-    um nó monitorado muda no servidor.
-    """
-    def __init__(self, logger: SubscriptionLogger, node_metadata: dict):
-        self.logger = logger
-        self.node_metadata = node_metadata
-
-    def datachange_notification(self, node, val, data):
-        """
-        Método de callback chamado quando há uma mudança de dados.
-        """
-        node_id_str = node.nodeid.to_string()
-        metadata = self.node_metadata.get(node_id_str, {})
-
-        log_entry = {
-            "timestamp_local": datetime.datetime.now().isoformat(),
-            "node_id": node_id_str,
-            "display_name": metadata.get('display_name', 'N/A'),
-            "value": val,
-            "source_timestamp": data.monitored_item.Value.SourceTimestamp.isoformat() if data.monitored_item.Value.SourceTimestamp else None,
-            "server_timestamp": data.monitored_item.Value.ServerTimestamp.isoformat() if data.monitored_item.Value.ServerTimestamp else None,
-        }
-        
-        self.logger.log_data(log_entry)
 
 
 # --- 3. Definição do Logger Principal com Subscrição ---
@@ -62,14 +33,16 @@ class OPCUASubscriptionLogger:
     Gerencia a conexão OPC UA, mapeia variáveis e as monitora
     usando uma subscrição para registrar mudanças de dados.
     """
-    def __init__(self, server_url, variables_to_monitor, publishing_interval_ms=500):
+    def __init__(self, server_url, variables_to_monitor, log_interval_seconds=1.0):
         self.server_url = server_url
         self.variables_to_monitor = variables_to_monitor
-        self.publishing_interval_ms = publishing_interval_ms
+        self.log_interval_seconds = log_interval_seconds
         self.client = None
-        self.subscription = None
-        self.node_metadata = {}  # {NodeIdStr: {'display_name': '...'}}
+        self.nodes_to_read = [] # Lista de objetos Node para leitura
+        self.node_metadata = {} # {NodeIdStr: {'display_name': '...'}}
         self.logger = SubscriptionLogger()
+        self._stop_event = threading.Event()
+        self._logging_thread = None
 
     def _connect_and_setup(self):
         """Conecta ao servidor, mapeia variáveis e cria a subscrição."""
@@ -79,31 +52,58 @@ class OPCUASubscriptionLogger:
         print("✅ Conexão estabelecida com sucesso.")
 
         # 1. Mapeamento de Metadados das Variáveis
+        self.nodes_to_read = []
         self.node_metadata = {}
-        nodes_to_subscribe = []
         for node_id_str in self.variables_to_monitor:
             try:
                 node = self.client.get_node(node_id_str)
                 display_name = node.get_display_name().Text
                 self.node_metadata[node_id_str] = {'display_name': display_name}
-                nodes_to_subscribe.append(node)
+                self.nodes_to_read.append(node)
                 print(f"   -> Mapeada variável: {node_id_str} (Display Name: {display_name})")
             except Exception as e:
                 print(f"   ❌ Erro ao mapear o Node {node_id_str}: {e}. Pulando este Node.", file=sys.stderr)
         
-        if not nodes_to_subscribe:
+        if not self.nodes_to_read:
             print("Nenhuma variável válida encontrada para monitorar. Desconectando.", file=sys.stderr)
             self._cleanup()
             raise Exception("Nenhuma variável válida para monitorar.")
 
-        # 2. Criação da Subscrição e do Handler
-        handler = DataChangeHandler(self.logger, self.node_metadata)
-        self.subscription = self.client.create_subscription(self.publishing_interval_ms, handler)
-        
-        # 3. Anexa os nós à subscrição
-        self.subscription.subscribe_data_change(nodes_to_subscribe)
-        print(f"\n✅ Subscrição criada com sucesso para {len(nodes_to_subscribe)} variáveis.")
+    def _log_snapshot(self):
+        """Lê todas as variáveis e as registra como um único ponto de dados."""
+        while not self._stop_event.is_set():
+            try:
+                if self.client:
+                    # Cria um único registro (log_entry) com todas as variáveis
+                    log_entry = {
+                        "timestamp_local": datetime.datetime.now().isoformat()
+                    }
+                    
+                    # Lê os valores de todos os nós de uma vez
+                    values = self.client.get_values(self.nodes_to_read)
+                    
+                    # Adiciona cada variável ao registro
+                    for node_obj, val in zip(self.nodes_to_read, values):
+                        node_id_str = node_obj.nodeid.to_string()
+                        display_name = self.node_metadata.get(node_id_str, {}).get('display_name', 'N/A')
+                        log_entry[display_name] = val
+                    
+                    # Escreve a linha completa no arquivo
+                    with open(self.logger.filename, 'a', encoding='utf-8') as f:
+                        f.write(json.dumps(log_entry) + '\n')
+                    
+                    print(f"[{log_entry['timestamp_local']}] 📸 Snapshot de {len(self.nodes_to_read)} variáveis salvo.")
+                
+                time.sleep(self.log_interval_seconds)
 
+            except ua.UaError as e:
+                print(f"\n[ERRO OPC UA no Logging]: {e}. O loop principal tentará reconectar.", file=sys.stderr)
+                # O loop principal cuidará da reconexão
+                break 
+            except Exception as e:
+                print(f"\n[ERRO no Logging Thread]: {e}", file=sys.stderr)
+                time.sleep(self.log_interval_seconds)
+        
     def run(self):
         """Loop principal com lógica de reconexão resiliente."""
         reconnect_delay = 5  # Segundos para esperar antes de tentar reconectar
@@ -114,9 +114,13 @@ class OPCUASubscriptionLogger:
                     self._connect_and_setup()
                 
                 if self.client is not None:
-                    print(f"Aguardando notificações de mudança de dados. Pressione Ctrl+C para sair.")
+                    # Inicia a thread de logging em segundo plano
+                    self._stop_event.clear()
+                    self._logging_thread = threading.Thread(target=self._log_snapshot, daemon=True)
+                    self._logging_thread.start()
+                    print(f"\n--- Iniciando coleta de snapshots a cada {self.log_interval_seconds}s. Pressione Ctrl+C para sair. ---")
                     while True:
-                        time.sleep(1)
+                        time.sleep(1) # Loop principal apenas para manter a conexão e detectar erros
                 
             except ua.UaError as e:
                 print(f"\n[ERRO OPC UA]: {e}. Tentando reconexão em {reconnect_delay}s...", file=sys.stderr)
@@ -138,13 +142,11 @@ class OPCUASubscriptionLogger:
 
     def _cleanup(self):
         """Limpa a conexão do cliente."""
-        if self.subscription:
-            try:
-                self.subscription.delete()
-                print("Subscrição removida.")
-            except Exception as e:
-                print(f"Erro ao remover subscrição: {e}")
-            self.subscription = None
+        self._stop_event.set()
+        if self._logging_thread and self._logging_thread.is_alive():
+            print("Aguardando a thread de logging encerrar...")
+            self._logging_thread.join(timeout=2)
+        self._logging_thread = None
 
         if self.client:
             try:
@@ -153,6 +155,8 @@ class OPCUASubscriptionLogger:
             except Exception as e:
                 print(f"Erro ao desconectar cliente: {e}")
             self.client = None
+        
+        print("Limpeza concluída.")
 
 
 # --- 4. Execução do Script ---
@@ -212,8 +216,8 @@ if __name__ == "__main__":
     "ns=2;i=42", # FACTORY_IO_CameraPosition
     ]
     
-    # Intervalo de publicação da subscrição em milissegundos
-    PUBLISHING_INTERVAL_MS = 500
+    # Intervalo de coleta de dados em segundos
+    LOG_INTERVAL_SECONDS = 1.0
 
     # --------------------
     
@@ -224,7 +228,7 @@ if __name__ == "__main__":
     logger = OPCUASubscriptionLogger(
         server_url=OPC_SERVER_URL,
         variables_to_monitor=NODES_TO_MONITOR,
-        publishing_interval_ms=PUBLISHING_INTERVAL_MS
+        log_interval_seconds=LOG_INTERVAL_SECONDS
     )
     
     logger.run()
