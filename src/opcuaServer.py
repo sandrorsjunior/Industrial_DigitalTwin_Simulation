@@ -131,7 +131,7 @@ def run_opcua_server():
                 print(f"Server ativo. C_TOTAL: {var_total.get_value()} | Sensor Difuso: {var_diffuse_sensor_0.get_value()}")
             
             # Simulação de alteração do C_TOTAL para mostrar que está vivo
-            var_total.set_value(var_total.get_value() + 1)
+            #var_total.set_value(var_total.get_value() + 1)
             count += 1
             time.sleep(1)
             
