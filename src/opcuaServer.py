@@ -140,6 +140,14 @@ def run_opcua_server():
         # Desliga o servidor de forma limpa
         server.stop()
         print("Servidor OPC UA desligado com sucesso.")
+    return server
 
 if __name__ == "__main__":
-    run_opcua_server()
+   from .controller.OPCUAVariableLogger import OPCUAVariableLogger
+   import threading
+   # Inicia o Servidor OPC UA em segundo plano 
+   server = run_opcua_server()
+    # Inicia o Logger de Variáveis OPC UA
+   logger = OPCUAVariableLogger(server, "log_variaveis.ndjson")
+   thread_logger = threading.Thread(target=logger.start, daemon=True)
+   thread_logger.start()
