@@ -2,8 +2,8 @@ from opcua import Client, Node, ua
 import sys
 
 # --- Configurações ---
-URL_SERVIDOR = "opc.tcp://127.0.0.1:4840" 
-NODE_ID_INICIAL = "ns=4;s=|var|CODESYS Control Win V3 x64.Application" 
+URL_SERVIDOR = "opc.tcp://127.0.0.2:4840" 
+NODE_ID_INICIAL = "i=85" 
 
 # Caracteres usados para desenhar a árvore
 LINE_PREFIX = "├── " # Prefixo para o nó atual

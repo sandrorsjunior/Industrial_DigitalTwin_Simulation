@@ -44,7 +44,8 @@ def run_opcua_server():
     print("Criando Sensores...")
     
     # Sensores Chave
-    var_diffuse_sensor = sensores_node.add_variable(idx, "Diffuse_Sensor_0", False, datatype=ua.NodeId(ua.ObjectIds.Boolean))
+    var_diffuse_sensor_0 = sensores_node.add_variable(idx, "Diffuse_Sensor_0", False, datatype=ua.NodeId(ua.ObjectIds.Boolean))
+    var_diffuse_sensor_1 = sensores_node.add_variable(idx, "Diffuse_Sensor_1", False, datatype=ua.NodeId(ua.ObjectIds.Boolean))
     var_pusher_back = sensores_node.add_variable(idx, "Pusher_0_Back_Limit", True, datatype=ua.NodeId(ua.ObjectIds.Boolean))
     var_pusher_front = sensores_node.add_variable(idx, "Pusher_0_Front_Limit", False, datatype=ua.NodeId(ua.ObjectIds.Boolean))
     var_emergency_stop = sensores_node.add_variable(idx, "Emergency_Stop_0", False, datatype=ua.NodeId(ua.ObjectIds.Boolean))
@@ -55,7 +56,7 @@ def run_opcua_server():
     var_reset_button = sensores_node.add_variable(idx, "Reset_Button_0", False, datatype=ua.NodeId(ua.ObjectIds.Boolean))
     
     # Tornar todos os sensores físicos writeable (para simulação via cliente Python)
-    for var in [var_diffuse_sensor, var_pusher_back, var_pusher_front, var_emergency_stop, var_start_button, var_stop_button, var_reset_button]:
+    for var in [var_diffuse_sensor_0, var_diffuse_sensor_1, var_pusher_back, var_pusher_front, var_emergency_stop, var_start_button, var_stop_button, var_reset_button]:
         var.set_writable()
 
 
@@ -127,10 +128,10 @@ def run_opcua_server():
             
             # Exemplo Simples de Monitoramento para o console
             if count % 10 == 0:
-                print(f"Server ativo. C_TOTAL: {var_total.get_value()} | Sensor Difuso: {var_diffuse_sensor.get_value()}")
+                print(f"Server ativo. C_TOTAL: {var_total.get_value()} | Sensor Difuso: {var_diffuse_sensor_0.get_value()}")
             
             # Simulação de alteração do C_TOTAL para mostrar que está vivo
-            #var_total.set_value(var_total.get_value() + 1)
+            var_total.set_value(var_total.get_value() + 1)
             count += 1
             time.sleep(1)
             
@@ -140,14 +141,6 @@ def run_opcua_server():
         # Desliga o servidor de forma limpa
         server.stop()
         print("Servidor OPC UA desligado com sucesso.")
-    return server
 
 if __name__ == "__main__":
-   from .controller.OPCUAVariableLogger import OPCUAVariableLogger
-   import threading
-   # Inicia o Servidor OPC UA em segundo plano 
-   server = run_opcua_server()
-    # Inicia o Logger de Variáveis OPC UA
-   logger = OPCUAVariableLogger(server, "log_variaveis.ndjson")
-   thread_logger = threading.Thread(target=logger.start, daemon=True)
-   thread_logger.start()
+   run_opcua_server()
