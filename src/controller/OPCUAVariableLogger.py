@@ -1,178 +1,18 @@
-import sys
+from opcua import Client, ua
 import time
 import json
-import threading
 import datetime
-from opcua import Client, ua
+import os
 
-# --- 1. Definição do Handler de Log de Subscrição ---
+# --- Configuração do Log ---
+LOG_FILE_PATH = "opcua_log.ndjson"
 
-class SubscriptionLogger:
-    """
-    Logger que processa e salva os dados recebidos via subscrição OPC UA
-    em um arquivo NDJSON (JSON delimitado por nova linha).
-    """
-    def __init__(self, filename="opcua_log_subscription.ndjson"):
-        self.filename = filename
-
-    def log_data(self, log_entry: dict):
-        """Escreve uma entrada de log no arquivo NDJSON."""
-        try:
-            with open(self.filename, 'a', encoding='utf-8') as f:
-                f.write(json.dumps(log_entry) + '\n')
-            print(f"[{log_entry['timestamp_local']}] 🔔 Logged change for {log_entry['node_id']} ({log_entry['display_name']}): {log_entry['value']}")
-
-        except Exception as e:
-            print(f"Erro ao escrever no arquivo de log: {e}", file=sys.stderr)
-
-
-# --- 3. Definição do Logger Principal com Subscrição ---
-
-class OPCUASubscriptionLogger:
-    """
-    Gerencia a conexão OPC UA, mapeia variáveis e as monitora
-    usando uma subscrição para registrar mudanças de dados.
-    """
-    def __init__(self, server_url, variables_to_monitor, log_interval_seconds=1.0):
-        self.server_url = server_url
-        self.variables_to_monitor = variables_to_monitor
-        self.log_interval_seconds = log_interval_seconds
-        self.client = None
-        self.nodes_to_read = [] # Lista de objetos Node para leitura
-        self.node_metadata = {} # {NodeIdStr: {'display_name': '...'}}
-        self.logger = SubscriptionLogger()
-        self._stop_event = threading.Event()
-        self._logging_thread = None
-
-    def _connect_and_setup(self):
-        """Conecta ao servidor, mapeia variáveis e cria a subscrição."""
-        print(f"--- Tentando conectar ao servidor OPC UA em: {self.server_url} ---")
-        self.client = Client(self.server_url)
-        self.client.connect()
-        print("✅ Conexão estabelecida com sucesso.")
-
-        # 1. Mapeamento de Metadados das Variáveis
-        self.nodes_to_read = []
-        self.node_metadata = {}
-        for node_id_str in self.variables_to_monitor:
-            try:
-                node = self.client.get_node(node_id_str)
-                display_name = node.get_display_name().Text
-                self.node_metadata[node_id_str] = {'display_name': display_name}
-                self.nodes_to_read.append(node)
-                print(f"   -> Mapeada variável: {node_id_str} (Display Name: {display_name})")
-            except Exception as e:
-                print(f"   ❌ Erro ao mapear o Node {node_id_str}: {e}. Pulando este Node.", file=sys.stderr)
-        
-        if not self.nodes_to_read:
-            print("Nenhuma variável válida encontrada para monitorar. Desconectando.", file=sys.stderr)
-            self._cleanup()
-            raise Exception("Nenhuma variável válida para monitorar.")
-
-    def _log_snapshot(self):
-        """Lê todas as variáveis e as registra como um único ponto de dados."""
-        while not self._stop_event.is_set():
-            try:
-                if self.client:
-                    # Cria um único registro (log_entry) com todas as variáveis
-                    log_entry = {
-                        "timestamp_local": datetime.datetime.now().isoformat()
-                    }
-                    
-                    # Lê os valores de todos os nós de uma vez
-                    values = self.client.get_values(self.nodes_to_read)
-                    
-                    # Adiciona cada variável ao registro
-                    for node_obj, val in zip(self.nodes_to_read, values):
-                        node_id_str = node_obj.nodeid.to_string()
-                        display_name = self.node_metadata.get(node_id_str, {}).get('display_name', 'N/A')
-                        log_entry[display_name] = val
-                    
-                    # Escreve a linha completa no arquivo
-                    with open(self.logger.filename, 'a', encoding='utf-8') as f:
-                        f.write(json.dumps(log_entry) + '\n')
-                    
-                    print(f"[{log_entry['timestamp_local']}] 📸 Snapshot de {len(self.nodes_to_read)} variáveis salvo.")
-                
-                time.sleep(self.log_interval_seconds)
-
-            except ua.UaError as e:
-                print(f"\n[ERRO OPC UA no Logging]: {e}. O loop principal tentará reconectar.", file=sys.stderr)
-                # O loop principal cuidará da reconexão
-                break 
-            except Exception as e:
-                print(f"\n[ERRO no Logging Thread]: {e}", file=sys.stderr)
-                time.sleep(self.log_interval_seconds)
-        
-    def run(self):
-        """Loop principal com lógica de reconexão resiliente."""
-        reconnect_delay = 5  # Segundos para esperar antes de tentar reconectar
-        
-        while True:
-            try:
-                if self.client is None:
-                    self._connect_and_setup()
-                
-                if self.client is not None:
-                    # Inicia a thread de logging em segundo plano
-                    self._stop_event.clear()
-                    self._logging_thread = threading.Thread(target=self._log_snapshot, daemon=True)
-                    self._logging_thread.start()
-                    print(f"\n--- Iniciando coleta de snapshots a cada {self.log_interval_seconds}s. Pressione Ctrl+C para sair. ---")
-                    while True:
-                        time.sleep(1) # Loop principal apenas para manter a conexão e detectar erros
-                
-            except ua.UaError as e:
-                print(f"\n[ERRO OPC UA]: {e}. Tentando reconexão em {reconnect_delay}s...", file=sys.stderr)
-                self._cleanup()
-                time.sleep(reconnect_delay)
-            except ConnectionRefusedError:
-                print(f"\n[ERRO DE REDE]: Conexão recusada. Tentando reconexão em {reconnect_delay}s...", file=sys.stderr)
-                self._cleanup()
-                time.sleep(reconnect_delay)
-            except KeyboardInterrupt:
-                print("\n🚨 Interrupção do usuário recebida. Encerrando...")
-                self._cleanup()
-                break
-            except Exception as e:
-                # Inclui a exceção de "Nenhuma variável válida..." aqui
-                print(f"\n[ERRO INESPERADO]: {e}. Tentando reconexão em {reconnect_delay}s...", file=sys.stderr)
-                self._cleanup()
-                time.sleep(reconnect_delay)
-
-    def _cleanup(self):
-        """Limpa a conexão do cliente."""
-        self._stop_event.set()
-        if self._logging_thread and self._logging_thread.is_alive():
-            print("Aguardando a thread de logging encerrar...")
-            self._logging_thread.join(timeout=2)
-        self._logging_thread = None
-
-        if self.client:
-            try:
-                self.client.disconnect()
-                print("Cliente desconectado.")
-            except Exception as e:
-                print(f"Erro ao desconectar cliente: {e}")
-            self.client = None
-        
-        print("Limpeza concluída.")
-
-
-# --- 4. Execução do Script ---
-
-if __name__ == "__main__":
-    # --- Configuração ---
-    
-    # ⚠️ Mude este endereço para o seu servidor OPC UA real
-    OPC_SERVER_URL = "opc.tcp://127.0.0.2:4840"
-    
-    # Lista completa de NodeIDs
-    NODES_TO_MONITOR = [
+# Lista de NodeIds a serem monitorados
+NODES_TO_MONITOR = [
     # Contadores_PLC (ns=2;i=2)
-    "ns=2;i=7", # C_TOTAL
-    "ns=2;i=8", # C_APROVADAS
-    "ns=2;i=9", # C_REJEITADAS
+    "ns=2;i=7",  # C_TOTAL
+    "ns=2;i=8",  # C_APROVADAS
+    "ns=2;i=9",  # C_REJEITADAS
     
     # IOs_Sensores_Fisicos (ns=2;i=3)
     "ns=2;i=10", # Diffuse_Sensor_0
@@ -214,21 +54,108 @@ if __name__ == "__main__":
     "ns=2;i=40", # FACTORY_IO_Pause
     "ns=2;i=41", # FACTORY_IO_TimeScale
     "ns=2;i=42", # FACTORY_IO_CameraPosition
-    ]
-    
-    # Intervalo de coleta de dados em segundos
-    LOG_INTERVAL_SECONDS = 1.0
+]
 
-    # --------------------
-    
-    if not NODES_TO_MONITOR:
-        print("Por favor, configure a lista NODES_TO_MONITOR com os NodeIds desejados.")
-        sys.exit(1)
+class SubHandler(object):
+    """
+    Handler para processar notificações de data change, armazenar o último valor
+    e registrar o evento em um arquivo NDJSON.
+    """
+    def __init__(self, log_file_path):
+        # Dicionário para armazenar o último valor lido de cada nó: {node_id_str: last_value}
+        self.last_values = {}
+        self.log_file_path = log_file_path
 
-    logger = OPCUASubscriptionLogger(
-        server_url=OPC_SERVER_URL,
-        variables_to_monitor=NODES_TO_MONITOR,
-        log_interval_seconds=LOG_INTERVAL_SECONDS
-    )
-    
-    logger.run()
+    def datachange_notification(self, node, val, data):
+        node_id_str = str(node.nodeid)
+        
+        # 1. Obter valor anterior e atualizar o valor armazenado
+        # Usamos .get() para retornar None se for a primeira notificação
+        valor_anterior = self.last_values.get(node_id_str)
+        
+        # 2. Extrair informações do evento
+        # O 'data' é um opcua.Subscription.EventData que contém a DataValue completa
+        
+        # O timestamp do servidor (útil para agrupar eventos simultâneos)
+        server_ts = data.monitored_item.Value.SourceTimestamp
+        timestamp_servidor = server_ts.isoformat() if server_ts else None
+        
+        # O tipo de dado
+        # O VariantType contém o enum do tipo de dado (ex: ua.VariantType.Boolean)
+        data_type = data.monitored_item.Value.Value.VariantType.name
+        
+        # 3. Construir o registro (JSON object)
+        log_entry = {
+            "evento_realizado": "DataChangeNotification",
+            "quem_realizou": "OPCUA_Client", # Identificador do cliente
+            "node_id": node_id_str,
+            "valor_atual": val,
+            "valor_anterior": valor_anterior,
+            "data_type": data_type,
+            "timestamp_servidor": timestamp_servidor,
+            "timestamp_local_processamento": datetime.datetime.now().isoformat(timespec='milliseconds'),
+        }
+
+        # 4. Escrever no arquivo NDJSON
+        try:
+            with open(self.log_file_path, 'a', encoding='utf-8') as f:
+                # O default=str é usado para garantir que objetos complexos (como datetime.datetime) 
+                # sejam serializados corretamente se ainda não tiverem sido convertidos.
+                json.dump(log_entry, f, default=str) 
+                f.write('\n') # Adiciona o delimitador de nova linha para o formato NDJSON
+
+        except Exception as e:
+            print(f"🚨 ERRO ao escrever no arquivo de log: {e}")
+
+        # 5. Atualiza o valor após o log (para o valor anterior ser correto no próximo evento)
+        self.last_values[node_id_str] = val
+
+
+if __name__ == "__main__":
+    server_url = "opc.tcp://127.0.0.2:4840"
+    client = Client(server_url)
+
+    try:
+        # 1. Conexão
+        client.connect()
+        print(f"✅ Cliente conectado ao servidor em {server_url}")
+
+        # 2. Criação do Handler e Assinatura
+        # Inicializa o handler passando o caminho do arquivo de log
+        handler = SubHandler(LOG_FILE_PATH)
+        # Cria uma assinatura com um intervalo de amostragem (200ms)
+        subscription = client.create_subscription(200, handler)
+
+        # 3. Inscrição para todos os Nodes
+        nodes_count = 0
+        print(f"\n📝 Arquivo de log: {LOG_FILE_PATH}")
+        print("⏳ Inscrevendo para monitorar os nós...")
+        
+        for node_id_str in NODES_TO_MONITOR:
+            try:
+                node = client.get_node(node_id_str)
+                subscription.subscribe_data_change(node)
+                # Inicializa o valor no handler lendo o valor atual imediatamente (opcional, mas garante o primeiro 'valor_anterior' como o valor inicial lido)
+                handler.last_values[node_id_str] = node.get_value()
+                print(f"   - Assinado com sucesso: {node_id_str}")
+                nodes_count += 1
+            except Exception as e:
+                print(f"   - ❌ ERRO ao assinar {node_id_str}: {e}")
+
+        print(f"\n✨ Total de {nodes_count} nós monitorados.")
+        print("📢 Aguardando notificações e registrando em NDJSON... (Pressione Ctrl+C para sair)")
+
+        # 4. Loop principal
+        while True:
+            time.sleep(0.5)
+
+    except KeyboardInterrupt:
+        print("\nInterrupção pelo usuário detectada.")
+    except Exception as e:
+        print(f"\n🚨 Ocorreu um erro: {e}")
+    finally:
+        # 5. Desconexão
+        if 'client' in locals() and client:
+            print("\nDesconectando o cliente.")
+            client.disconnect()
+            print("🛑 Cliente desconectado.")
