@@ -5,7 +5,7 @@ import datetime
 import os
 
 # --- Configuração do Log ---
-LOG_FILE_PATH = "../../logs/opcua_variable_log.ndjson"
+LOG_FILE_PATH = "..\\..\\logs\\opcua_variable_log.ndjson"
 
 # Lista de NodeIds a serem monitorados
 NODES_TO_MONITOR = [
