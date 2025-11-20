@@ -1,6 +1,8 @@
 import time
 from opcua import Server, ua
 
+from controller.EmitterController import BoxCompetitor
+
 # --- 1. CONFIGURAÇÕES BÁSICAS ---
 # Endereço de conexão do Servidor
 OPCUA_ENDPOINT = "opc.tcp://127.0.0.2:4840"
@@ -120,12 +122,14 @@ def run_opcua_server():
     # --- 5. LOOP DE MANUTENÇÃO (Mantém o servidor rodando) ---
     try:
         count = 0
+        competitor = BoxCompetitor()
         while True:
             # ************************************************************
             # * CLIENTE (CODESYS/PYTHON ORQUESTRADOR) ESCREVE AQUI       *
             # * O SERVIDOR APENAS MANTÉM OS NÓS ATIVOS                   *
             # ************************************************************
-            
+            vencedor, _, _, _ = competitor.run_competition()
+            var_emitter_part.set_value(competitor.PART_TYPES[vencedor])
             # Exemplo Simples de Monitoramento para o console
             if count % 10 == 0:
                 print(f"Server ativo. C_TOTAL: {var_total.get_value()} | Sensor Difuso: {var_diffuse_sensor_0.get_value()}")
