@@ -1,119 +1,161 @@
-import time
-from opcua import Client
+import random
+import math
+from typing import Dict, Any, Tuple, Optional
 
-# --- 1. CONFIGURAÇÕES OPC UA ---
-OPCUA_ENDPOINT = "opc.tcp://127.0.0.2:4840"
-NAMESPACE_URI = "http://controle.fabrica.com/ns"
-# O caminho do nó que controla o tipo de peça (baseado na estrutura do Servidor anterior)
-EMITTER_PART_NODE_PATH = "0:Objects/{}:Linha_Triagem_IIoT/IOs_Atuadores_Fisicos/Emitter_0_Part"
-
-class EmitterController:
+class BoxCompetitor:
     """
-    Controlador Cliente OPC UA para definir o tipo de peça a ser emitida
-    pelo Emitter 0 no Factory I/O.
+    Simula a competição entre tipos de caixas, onde cada tipo "compete" 
+    gerando um valor entre 0 e 1 usando uma distribuição estatística.
+    O tipo de caixa com o maior valor é o vencedor.
     """
 
-    # Mapeamento do Factory I/O (Emitter > Options)
-    PART_TYPES = {
-        "SMALL_BOX": 0,
-        "BOX": 1,
-        "PLASTIC_CONTAINER": 2,
-        "WOODEN_PALLET": 3,
-        "BARREL": 4
+    PART_TYPES: Dict[str, int] = {
+        "SMALL_BOX": 1,
+        "MEDIUM_BOX": 2,
+        "LARGE_BOX": 4,
+        "PALLETIZING_BOX": 8,
+        "BLUE_RAW_MATERIAL": 16,
+        "GREEN_RAW_MATERIAL": 32,
+        "METAL_RAW_MATERIAL": 64,
+        "BLUE_PRODUCT_BASE": 128,
+        "GREEN_PRODUCT_BASE": 256,
+        "METAL_PRODUCT_BASE": 512,
+        "BLUE_PRODUCT_LID": 1024,
+        "GREEN_PRODUCT_LID": 2048,
+        "METAL_PRODUCT_LID": 4096,
+        "STACKABLE_BOX": 8192,
     }
 
-    def __init__(self, endpoint: str = OPCUA_ENDPOINT, namespace_uri: str = NAMESPACE_URI):
-        self.client = Client(endpoint)
-        self.namespace_uri = namespace_uri
-        self.emitter_part_node = None
-        self.namespace_idx = -1
+    # CORREÇÃO: "EXPONENCIAL" alterado para "EXPONENTIAL"
+    DISTRIBUTION_GROUPS: Dict[str, list[str]] = {
+        "EXPONENTIAL": [ 
+            "SMALL_BOX", "MEDIUM_BOX", "LARGE_BOX", "PALLETIZING_BOX"
+        ],
+        "POISSON": [
+            "BLUE_RAW_MATERIAL", "GREEN_RAW_MATERIAL", "METAL_RAW_MATERIAL", "BLUE_PRODUCT_BASE"
+        ],
+        "WEIBULL": [
+            "GREEN_PRODUCT_BASE", "METAL_PRODUCT_BASE", "BLUE_PRODUCT_LID"
+        ],
+        "NORMAL": [
+            "GREEN_PRODUCT_LID", "METAL_PRODUCT_LID", "STACKABLE_BOX"
+        ],
+    }
+    
+    # CORREÇÃO: "EXPONENCIAL" alterado para "EXPONENTIAL"
+    DISTRIBUTION_PARAMS: Dict[str, Dict[str, float]] = {
+        "EXPONENTIAL": {"lambda": 5.0}, 
+        "POISSON": {"lambda": 2.0},
+        "WEIBULL": {"alpha": 1.5, "beta": 1.0},
+        "NORMAL": {"mu": 0.5, "sigma": 0.2},
+    }
 
-    def connect(self):
-        """Estabelece a conexão com o Servidor OPC UA e encontra o nó."""
-        try:
-            print(f"Conectando a {self.client.server_url}...")
-            self.client.connect()
-            print("Conexão estabelecida com sucesso.")
+    def _generate_exponential(self, part_name: str) -> float:
+        """ Gera um valor da distribuição exponencial e o escalona para [0, 1]. """
+        # CORREÇÃO: Acessa o parâmetro usando a chave "EXPONENTIAL"
+        lambd = self.DISTRIBUTION_PARAMS["EXPONENTIAL"]["lambda"]
+        
+        value = random.expovariate(lambd)
+        result = math.exp(-lambd * value) 
+        return result
 
-            # 1. Encontrar o índice do Namespace
-            self.namespace_idx = self.client.get_namespace_index(self.namespace_uri)
-            if self.namespace_idx == 0:
-                 # Se for 0, geralmente é o default OPC UA. Tenta o índice 2 (comum para namespaces customizados)
-                 self.namespace_idx = 2 
-            
-            # 2. Construir o caminho completo do nó e obtê-lo
-            node_path = EMITTER_PART_NODE_PATH.format(self.namespace_idx)
-            self.emitter_part_node = self.client.get_node(node_path)
-            
-            if self.emitter_part_node:
-                print(f"Nó do Emitter Part encontrado: {node_path}")
-            else:
-                print(f"ERRO: Nó do Emitter Part não encontrado no caminho: {node_path}")
+    def _generate_poisson(self, part_name: str) -> float:
+        """ Gera um valor da distribuição de Poisson e o escalona para [0, 1]. """
+        lambd = self.DISTRIBUTION_PARAMS["POISSON"]["lambda"]
+        
+        k = random.randint(0, 5) 
+        
+        # Calculamos a PMF do número k gerado
+        pmf = (lambd**k * math.exp(-lambd)) / math.factorial(k)
+        
+        return pmf
+    
+    def _generate_weibull(self, part_name: str) -> float:
+        """ Gera um valor da distribuição de Weibull e o escalona para [0, 1]. """
+        alpha = self.DISTRIBUTION_PARAMS["WEIBULL"]["alpha"]
+        beta = self.DISTRIBUTION_PARAMS["WEIBULL"]["beta"]
+        
+        value = random.weibullvariate(alpha=alpha, beta=beta)
+        
+        cdf = 1 - math.exp(-((value / beta)**alpha))
+        return min(cdf, 1.0) 
 
-        except Exception as e:
-            print(f"Falha na conexão ou na busca do nó: {e}")
-            self.disconnect()
+    def _generate_normal(self, part_name: str) -> float:
+        """ Gera um valor da distribuição normal e o trunca/escalona para [0, 1]. """
+        mu = self.DISTRIBUTION_PARAMS["NORMAL"]["mu"]
+        sigma = self.DISTRIBUTION_PARAMS["NORMAL"]["sigma"]
+        
+        value = random.gauss(mu=mu, sigma=sigma)
+        
+        return max(0.0, min(1.0, value)) 
 
-    def disconnect(self):
-        """Desconecta do Servidor OPC UA."""
-        if self.client:
-            self.client.disconnect()
-            print("Desconectado do Servidor OPC UA.")
-
-    def set_part_type(self, part_name: str):
+    def run_competition(self) -> Tuple[str, float, str, Dict[str, float]]:
         """
-        Define o tipo de peça a ser emitido no Factory I/O.
+        Executa a competição, gerando um valor para cada PART_TYPE e 
+        determinando o vencedor.
         
-        Args:
-            part_name: O nome da peça (Ex: 'SMALL_BOX', 'BOX').
+        :return: Uma tupla contendo (part_vencedora, valor_vencedor, distribuicao_vencedora, resultados_detalhados)
         """
-        if not self.emitter_part_node:
-            print("ERRO: Cliente não conectado ou nó não encontrado.")
-            return
-
-        part_name = part_name.upper().replace(' ', '_')
+        results: Dict[str, float] = {}
         
-        if part_name not in self.PART_TYPES:
-            print(f"ERRO: Tipo de peça '{part_name}' inválido.")
-            print(f"Tipos válidos são: {list(self.PART_TYPES.keys())}")
-            return
-
-        part_value = self.PART_TYPES[part_name]
+        generation_map: Dict[str, callable] = {}
+        for dist_type, parts in self.DISTRIBUTION_GROUPS.items():
+            # dist_type.lower() agora será "exponential" (correto)
+            generator = getattr(self, f"_generate_{dist_type.lower()}") 
+            for part in parts:
+                generation_map[part] = generator
         
-        try:
-            # Escreve o valor numérico no nó do atuador
-            self.emitter_part_node.set_value(part_value)
-            print(f"Comando enviado: Definido o Emitter Part como '{part_name}' ({part_value}).")
-            
-        except Exception as e:
-            print(f"Falha ao escrever no nó OPC UA: {e}")
+        # 1. Gerar o número para cada PART_TYPE
+        for part_name, generator in generation_map.items():
+            generated_value = generator(part_name)
+            results[part_name] = generated_value
 
-# --- 2. EXEMPLO DE USO ---
-if __name__ == "__main__":
-    controller = EmitterController()
-    controller.connect()
+        # 2. Avaliar o maior número gerado (o vencedor)
+        if not results:
+            raise ValueError("Nenhuma peça configurada para competição.")
+            
+        winner_part = max(results, key=results.get)
+        winner_value = results[winner_part]
+        
+        # 3. Determinar a distribuição do vencedor
+        winner_distribution = ""
+        for dist_type, parts in self.DISTRIBUTION_GROUPS.items():
+            if winner_part in parts:
+                winner_distribution = dist_type
+                break
 
-    if controller.emitter_part_node:
-        try:
-            print("\n--- Teste de Alteração de Peça ---")
-            
-            # 1. Tenta definir para Caixa Média (Valor 1)
-            controller.set_part_type("BOX")
-            time.sleep(3)
-            
-            # 2. Tenta definir para Contêiner Plástico (Valor 2)
-            controller.set_part_type("PLASTIC_CONTAINER")
-            time.sleep(3)
-            
-            # 3. Tenta definir para Pallet de Madeira (Valor 3)
-            controller.set_part_type("WOODEN_PALLET")
-            time.sleep(3)
+        return winner_part, winner_value, winner_distribution, results
 
-        except KeyboardInterrupt:
-            print("\nOperação interrompida pelo usuário.")
-            
-        finally:
-            # 4. Retorna para o valor padrão (Caixa Pequena)
-            controller.set_part_type("SMALL_BOX")
-            
-    controller.disconnect()
+
+# --- Exemplo de Uso ---
+print("## 🚀 Início da Competição de Peças\n")
+
+# Instancia a classe
+competitor = BoxCompetitor()
+
+# Executa o processo de competição
+vencedor, valor, distribuicao, todos_resultados = competitor.run_competition()
+
+# --- Apresentação dos Resultados ---
+print("### 🥇 Resultado da Rodada")
+print(f"**Caixa Vencedora:** {vencedor}")
+print(f"**Valor Vencedor:** {valor:.6f}")
+print(f"**Distribuição Vencedora:** {distribuicao}\n")
+
+print("---")
+
+print("### 📈 Detalhes dos Resultados Gerados (TOP 5)")
+# Ordenar os resultados do maior para o menor
+sorted_results = sorted(todos_resultados.items(), key=lambda item: item[1], reverse=True)
+
+# Imprimir os 5 primeiros
+for i, (part, value) in enumerate(sorted_results[:5]):
+    dist = ""
+    for d, parts in competitor.DISTRIBUTION_GROUPS.items():
+        if part in parts:
+            dist = d
+            break
+    print(f"* **{i+1}. {part}** ({dist}): {value:.6f}")
+    
+if len(sorted_results) > 5:
+    print("\n* ... (Demais resultados omitidos) ...")
